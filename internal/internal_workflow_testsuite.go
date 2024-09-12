@@ -2385,31 +2385,31 @@ func (env *testWorkflowEnvironmentImpl) ExecuteNexusOperation(params executeNexu
 				handle.completedCallback(nil, err)
 			}, true)
 			return
-		} else {
-			switch v := response.GetResponse().GetStartOperation().GetVariant().(type) {
-			case *nexuspb.StartOperationResponse_SyncSuccess:
-				env.postCallback(func() {
-					handle.startedCallback("", nil)
-					handle.completedCallback(v.SyncSuccess.GetPayload(), nil)
-				}, true)
-			case *nexuspb.StartOperationResponse_AsyncSuccess:
-				env.postCallback(func() {
-					handle.startedCallback(v.AsyncSuccess.GetOperationId(), nil)
-					if handle.cancelRequested {
-						handle.cancel()
-					}
-				}, true)
-			case *nexuspb.StartOperationResponse_OperationError:
-				err := env.failureConverter.FailureToError(
-					nexusOperationFailure(params, "", unsuccessfulOperationErrorToTemporalFailure(v.OperationError)),
-				)
-				env.postCallback(func() {
-					handle.startedCallback("", err)
-					handle.completedCallback(nil, err)
-				}, true)
-			default:
-				panic(fmt.Errorf("unknown response variant: %v", v))
-			}
+		}
+
+		switch v := response.GetResponse().GetStartOperation().GetVariant().(type) {
+		case *nexuspb.StartOperationResponse_SyncSuccess:
+			env.postCallback(func() {
+				handle.startedCallback("", nil)
+				handle.completedCallback(v.SyncSuccess.GetPayload(), nil)
+			}, true)
+		case *nexuspb.StartOperationResponse_AsyncSuccess:
+			env.postCallback(func() {
+				handle.startedCallback(v.AsyncSuccess.GetOperationId(), nil)
+				if handle.cancelRequested {
+					handle.cancel()
+				}
+			}, true)
+		case *nexuspb.StartOperationResponse_OperationError:
+			err := env.failureConverter.FailureToError(
+				nexusOperationFailure(params, "", unsuccessfulOperationErrorToTemporalFailure(v.OperationError)),
+			)
+			env.postCallback(func() {
+				handle.startedCallback("", err)
+				handle.completedCallback(nil, err)
+			}, true)
+		default:
+			panic(fmt.Errorf("unknown response variant: %v", v))
 		}
 	}()
 	return seq
@@ -2832,7 +2832,7 @@ func mockFnGetVersion(string, Version, Version) Version {
 var _ WorkflowEnvironment = (*testWorkflowEnvironmentImpl)(nil)
 
 func (h *testNexusOperationHandle) newStartTask() *workflowservice.PollNexusTaskQueueResponse {
-	return &workflowservice.PollNexusTaskQueueResponse{
+	resp := &workflowservice.PollNexusTaskQueueResponse{
 		TaskToken: []byte{},
 		Request: &nexuspb.Request{
 			ScheduledTime: timestamppb.Now(),
@@ -2853,10 +2853,14 @@ func (h *testNexusOperationHandle) newStartTask() *workflowservice.PollNexusTask
 			},
 		},
 	}
+	if h.params.options.ScheduleToCloseTimeout > 0 {
+		resp.Request.Header[strings.ToLower(nexus.HeaderRequestTimeout)] = h.params.options.ScheduleToCloseTimeout.String()
+	}
+	return resp
 }
 
 func (h *testNexusOperationHandle) newCancelTask() *workflowservice.PollNexusTaskQueueResponse {
-	return &workflowservice.PollNexusTaskQueueResponse{
+	resp := &workflowservice.PollNexusTaskQueueResponse{
 		TaskToken: []byte{},
 		Request: &nexuspb.Request{
 			ScheduledTime: timestamppb.Now(),
@@ -2870,6 +2874,10 @@ func (h *testNexusOperationHandle) newCancelTask() *workflowservice.PollNexusTas
 			},
 		},
 	}
+	if h.params.options.ScheduleToCloseTimeout > 0 {
+		resp.Request.Header[strings.ToLower(nexus.HeaderRequestTimeout)] = h.params.options.ScheduleToCloseTimeout.String()
+	}
+	return resp
 }
 
 // completedCallback is a callback registered to handle operation completion.

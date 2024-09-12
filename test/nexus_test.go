@@ -977,6 +977,63 @@ func TestWorkflowTestSuite_WorkflowRunOperation_WithCancel(t *testing.T) {
 	}
 }
 
+func TestWorkflowTestSuite_NexusSyncOperation_ScheduleToCloseTimeout(t *testing.T) {
+	sleepDuration := 1 * time.Second
+	op := temporalnexus.NewSyncOperation(
+		"sync-op",
+		func(
+			ctx context.Context,
+			c client.Client,
+			_ nexus.NoValue,
+			opts nexus.StartOperationOptions,
+		) (nexus.NoValue, error) {
+			time.Sleep(sleepDuration)
+			return nil, nil
+		},
+	)
+	wf := func(ctx workflow.Context, scheduleToCloseTimeout time.Duration) error {
+		client := workflow.NewNexusClient("endpoint", "test")
+		fut := client.ExecuteOperation(ctx, op, nil, workflow.NexusOperationOptions{
+			ScheduleToCloseTimeout: scheduleToCloseTimeout,
+		})
+		return fut.Get(ctx, nil)
+	}
+
+	service := nexus.NewService("test")
+	service.Register(op)
+
+	testCases := []struct {
+		name                   string
+		scheduleToCloseTimeout time.Duration
+	}{
+		{
+			name:                   "success",
+			scheduleToCloseTimeout: sleepDuration * 2,
+		},
+		{
+			name:                   "timeout",
+			scheduleToCloseTimeout: sleepDuration / 2,
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			suite := testsuite.WorkflowTestSuite{}
+			env := suite.NewTestWorkflowEnvironment()
+			env.RegisterWorkflow(waitForCancelWorkflow)
+			env.RegisterNexusService(service)
+			env.ExecuteWorkflow(wf, tc.scheduleToCloseTimeout)
+			require.True(t, env.IsWorkflowCompleted())
+			if tc.scheduleToCloseTimeout >= sleepDuration {
+				require.NoError(t, env.GetWorkflowError())
+			} else {
+				require.ErrorContains(t, env.GetWorkflowError(), context.DeadlineExceeded.Error())
+			}
+		})
+	}
+}
+
 func TestWorkflowTestSuite_NexusSyncOperation_ClientMethods_Panic(t *testing.T) {
 	var panicReason any
 	op := temporalnexus.NewSyncOperation("signal-op", func(ctx context.Context, c client.Client, _ nexus.NoValue, opts nexus.StartOperationOptions) (nexus.NoValue, error) {
